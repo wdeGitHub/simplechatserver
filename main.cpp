@@ -43,7 +43,7 @@ int main()
     socklen_t len=sizeof(cliaddr);
     int fd=accept(cfd,(sockaddr*)&addr,&len);
     while (1) {
-        
+        read(fd, nullptr, 0);
     }
 
     return 0;
