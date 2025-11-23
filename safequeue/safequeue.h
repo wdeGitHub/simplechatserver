@@ -133,9 +133,12 @@ template <typename T>
 T SafeQueue<T>::pop_b()
 {
     //队列为空时阻塞，等待队列有元素，函数出错直接返回
+    do
+    {
     if(sem_wait(&m_sem)!=0)
     {
-        exit(1);
+        throw std::runtime_error("sem_wait error");
+        break;
     }
     pthread_mutex_lock(&mutex);
     if (list.empty()){
@@ -146,6 +149,7 @@ T SafeQueue<T>::pop_b()
     list.pop_front();
     pthread_mutex_unlock(&mutex);
     return value;
+    } while (1);
 }
 // template <typename T>
 // std::list<T> pop_b(int num) {

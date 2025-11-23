@@ -6,6 +6,8 @@
 #include<vector>
 #include<semaphore.h>
 #include<unistd.h>
+#include<functional>
+#include<vector>
 template<typename T>
 class ThreadPool
 {
@@ -16,6 +18,7 @@ public:
     void work();
     void start();
     void close();
+    int addFunction(std::function<int(T*)>);
     ~ThreadPool();
 private:
     //线程安全的任务队列
@@ -25,6 +28,7 @@ private:
     bool isClose;//线程池是否关闭
     std::vector<pthread_t> *threads;//线程池中的线程
     sem_t sem;  //用于监管资源
+    std::vector<std::function<int(T*)>> funbox;//往funbox中添加函数,线程池执行,用这个特性，增加池的通用性
 };
 
 
@@ -62,7 +66,9 @@ void ThreadPool<T>::work()
         T* task=this->taskQueue.pop();
         if(task!=nullptr)
         {
-            task->process();
+            auto &f=funbox.at(task->state);
+            f(task);
+            //task->process();
         }
         else{
             sleep(1);
@@ -98,7 +104,12 @@ void ThreadPool<T>::close()
         sem_post(&sem);  // 每次 post 唤醒一个线程
     }
 }
-template<typename T>
+template <typename T>
+inline int ThreadPool<T>::addFunction(std::function<int(T *)>)
+{
+    return 0;
+}
+template <typename T>
 ThreadPool<T>::~ThreadPool()
 {
     close();

@@ -24,8 +24,8 @@ public:
     void init(std::string ip,std::string user,std::string passwd,std::string db,int Port,int con_num,int thread_count);//初始化
     void thread_pool();//初始化线程池，将创建连接的任务函数放入
     void sql_pool();//在解析需求之前，先初始化，在request中还要用到
-    void eventListen();
-    void eventLoop();
+    void eventListen();//设置监听
+    void eventLoop();//事件循环
 private:
     void process();//处理函数
     ThreadPool<tcp_conn> *m_pool;//处理客户端请求的
@@ -44,7 +44,7 @@ private:
     int epoll_fd;
     struct epoll_event events[1024];
     int ep_size;
-    tcp_conn *user;
+    tcp_conn *users;
     //线程类
     int m_thread_count;
 };
