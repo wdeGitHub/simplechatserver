@@ -1,0 +1,2 @@
+test_sql : test_sqlconnection.cpp sqlconnectionpool.h sqlconnectionpool.cpp
+	g++ -o test_sql test_sqlconnection.cpp sqlconnectionpool.cpp -lpthread -I/usr/include/mysql/ -L/usr/lib64/mysql/ -lmysqlclient
