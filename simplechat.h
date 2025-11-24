@@ -16,6 +16,8 @@
 #include<fcntl.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+const int MAX_FD = 65536;           //最大文件描述符
+const int MAX_EVENT_NUMBER = 10000; //最大事件数
 class SimpleChat
 {
 public:
@@ -26,7 +28,11 @@ public:
     void sql_pool();//在解析需求之前，先初始化，在request中还要用到
     void eventListen();//设置监听
     void eventLoop();//事件循环
+    int recvData(int sockfd);
+    void parseData(int sockfd,char *,int);
 private:
+    void handleRead(int sockfd);
+    void handleWrite(int sockfd);
     void process();//处理函数
     ThreadPool<tcp_conn> *m_pool;//处理客户端请求的
     SqlConnectionPool *m_sqlconnpool;

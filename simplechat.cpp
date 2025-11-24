@@ -1,9 +1,53 @@
 #include "simplechat.h"
+#include <stdexcept>
+#include <cerrno>
+
+namespace {
+int setNonBlock(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags == -1) {
+        return -1;
+    }
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+        return -1;
+    }
+    return 0;
+}
+}
 
 SimpleChat::SimpleChat()
-{
-    m_pool = nullptr;
-    m_sqlconnpool = nullptr;
+    : m_pool(nullptr),
+      m_sqlconnpool(nullptr),
+      m_user(),
+      m_passwd(),
+      m_db(),
+      m_con_num(0),
+      m_ip(),
+      m_port(-1),
+      m_lfd(-1),
+      epoll_fd(-1),
+      ep_size(0),
+      users(nullptr),
+      m_thread_count(0) {
+    memset(events, 0, sizeof(events));
+}
+
+SimpleChat::~SimpleChat() {
+    if (epoll_fd != -1) {
+        close(epoll_fd);
+        epoll_fd = -1;
+    }
+    if (m_lfd != -1) {
+        close(m_lfd);
+        m_lfd = -1;
+    }
+    if (m_pool != nullptr) {
+        m_pool->close();
+        delete m_pool;
+        m_pool = nullptr;
+    }
+    delete[] users;
+    users = nullptr;
 }
 
 void SimpleChat::init(std::string ip,std::string user,std::string passwd,std::string db,int Port,int con_num,int thread_count)
@@ -17,9 +61,14 @@ void SimpleChat::init(std::string ip,std::string user,std::string passwd,std::st
     m_thread_count=thread_count;
 }
 
-void SimpleChat::thread_pool()
-{
-    m_pool = new ThreadPool<tcp_conn>(m_thread_count);
+void SimpleChat::thread_pool() {
+    if (m_thread_count <= 0) {
+        throw std::invalid_argument("thread count must be positive");
+    }
+    if (m_pool == nullptr) {
+        m_pool = new ThreadPool<tcp_conn>(m_thread_count);
+        m_pool->start();
+    }
 }
 
 void SimpleChat::sql_pool()
@@ -30,91 +79,135 @@ void SimpleChat::sql_pool()
 
 void SimpleChat::eventListen()
 {
-    int lfd=socket(AF_INET,SOCK_STREAM,0);
-    if(lfd==-1)
-    {
-        std::runtime_error("cfd init defeat");
+    int lfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (lfd == -1) {
+        throw std::runtime_error("socket init defeat");
     }
     int opt = 1;
     setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    struct  sockaddr_in addr;
-    addr.sin_addr.s_addr=INADDR_ANY;
-    addr.sin_family=AF_INET;
-    addr.sin_port=htons(m_port);
-    int tem=bind(lfd,(sockaddr*)&addr,sizeof(addr));
-    if(tem==-1)
-    {
-        std::runtime_error("bind error");
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(m_port);
+    if (bind(lfd, (sockaddr*)&addr, sizeof(addr)) == -1) {
+        close(lfd);
+        throw std::runtime_error("bind error");
     }
-    tem=listen(lfd,64);
-    m_lfd=lfd;
+    if (listen(lfd, 64) == -1) {
+        close(lfd);
+        throw std::runtime_error("listen error");
+    }
+    if (setNonBlock(lfd) == -1) {
+        close(lfd);
+        throw std::runtime_error("set nonblock error");
+    }
+    m_lfd = lfd;
 
-
-    int epfd=epoll_create(100);
+    int epfd = epoll_create1(0);
+    if (epfd == -1) {
+        close(m_lfd);
+        m_lfd = -1;
+        throw std::runtime_error("epoll_create1 error");
+    }
     struct epoll_event ev;
-    ev.events = EPOLLIN;    // 检测lfd读读缓冲区是否有数据
+    memset(&ev, 0, sizeof(ev));
+    ev.events = EPOLLIN;
     ev.data.fd = lfd;
-    int ret = epoll_ctl(epfd, EPOLL_CTL_ADD, lfd, &ev);
-    if(ret == -1)
-    {
-        perror("epoll_ctl     ");
-        exit(0);
+    if (epoll_ctl(epfd, EPOLL_CTL_ADD, lfd, &ev) == -1) {
+        close(epfd);
+        throw std::runtime_error("epoll_ctl add listen fd error");
     }
+    epoll_fd = epfd;
     ep_size = sizeof(events) / sizeof(struct epoll_event);
+    if (users == nullptr) {
+        users = new tcp_conn[ep_size];
+    }
 }
 
 void SimpleChat::eventLoop()
 {
-    while(1)
-    {
-        int num=epoll_wait(epoll_fd,events,ep_size,-1);
-        for(int i=0;i<num;i++)
-        {
-            int now_fd=events[i].data.fd;
-            if(now_fd==m_lfd)
-            {
-                struct sockaddr_in user_addr;
-                socklen_t count;
-                int userfd=accept(m_lfd,(sockaddr*)&user_addr,&count);
-                struct epoll_event ev;
-                ev.events = EPOLLIN;    // 读缓冲区是否有数据
-                ev.data.fd = userfd;
-                int ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, userfd, &ev);
-                if(ret == -1)
-                {
-                    perror("epoll_ctl-accept");
-                    exit(0);
-                }
-                if(userfd==-1)
-                {
-                    exit(1);
-                }
+    if (epoll_fd == -1 || m_lfd == -1) {
+        throw std::logic_error("eventLoop called before eventListen");
+    }
+    while (true) {
+        int num = epoll_wait(epoll_fd, events, ep_size, -1);
+        if (num == -1) {
+            if (errno == EINTR) {
+                continue;
             }
-            else{
-                 // 处理通信的文件描述符
-                // 接收数据
-                //检测要发送用户在不在线，若不在线存入request队列，关闭时存入log文件
-                char buf[1024];
-                memset(buf, 0, sizeof(buf));
-                int len = recv(now_fd, buf, sizeof(buf), 0);
-                if(len == 0)
-                {
-                    printf("客户端已经断开了连接\n");
-                    // 将这个文件描述符从epoll模型中删除
-                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, now_fd, NULL);
-                    close(now_fd);
+            throw std::runtime_error("epoll_wait error");
+        }
+        for (int i = 0; i < num; ++i) {
+            int now_fd = events[i].data.fd;
+            uint32_t event_mask = events[i].events;
+            if (now_fd == m_lfd) {
+                struct sockaddr_in user_addr;
+                socklen_t count = sizeof(user_addr);
+                int userfd = accept(m_lfd, (sockaddr*)&user_addr, &count);
+                if (userfd == -1) {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        continue;
+                    }
+                    perror("accept");
+                    continue;
                 }
-                else if(len > 0)
-                {
-                    printf("客户端say: %s\n", buf);
-                    send(now_fd, buf, len, 0);
+                setNonBlock(userfd);
+                struct epoll_event ev;
+                memset(&ev, 0, sizeof(ev));
+                ev.events = EPOLLIN | EPOLLRDHUP;
+                ev.data.fd = userfd;
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, userfd, &ev) == -1) {
+                    perror("epoll_ctl-accept");
+                    close(userfd);
+                    continue;
                 }
-                else
-                {
-                    perror("recv");
-                    exit(0);
-                } 
+                continue;
+            }
+
+            if (event_mask & (EPOLLERR | EPOLLRDHUP | EPOLLHUP)) {
+                epoll_ctl(epoll_fd, EPOLL_CTL_DEL, now_fd, NULL);
+                close(now_fd);
+                continue;
+            }
+
+            if (event_mask & EPOLLIN) {
+                handleRead(now_fd);
+            } else if (event_mask & EPOLLOUT) {
+                handleWrite(now_fd);
             }
         }
     }
+}
+
+void SimpleChat::handleRead(int sockfd) {
+    // char buf[1024];
+    // memset(buf, 0, sizeof(buf));
+    // int len = recv(sockfd, buf, sizeof(buf), 0);
+    // if (len == 0) {
+    //     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, sockfd, NULL);
+    //     close(sockfd);
+    // } else if (len > 0) {
+    //     send(sockfd, buf, len, 0);
+    // } else {
+    //     if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+    //         perror("recv");
+    //         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, sockfd, NULL);
+    //         close(sockfd);
+    //     }
+    // }
+    m_pool->append(users+sockfd,0);
+}
+
+void SimpleChat::handleWrite(int sockfd) {
+    // struct epoll_event ev;
+    // memset(&ev, 0, sizeof(ev));
+    // ev.events = EPOLLIN | EPOLLRDHUP;
+    // ev.data.fd = sockfd;
+    // if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, sockfd, &ev) == -1) {
+    //     perror("epoll_ctl-mod");
+    //     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, sockfd, NULL);
+    //     close(sockfd);
+    // }
+    m_pool->append(users+sockfd,1);
 }

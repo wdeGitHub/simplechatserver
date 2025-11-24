@@ -14,6 +14,7 @@ class ThreadPool
 public:
     ThreadPool(int threadCount=8,int maxrequest=10000);
     bool append(T* reqstruct);
+    bool append(T* reqstruct,int state);
     bool isClosePool();
     void work();
     void start();
@@ -58,6 +59,17 @@ bool ThreadPool<T>::append(T* reqstruct)
     return false;
 }
 template<typename T>
+bool ThreadPool<T>::append(T* reqstruct,int state)
+{
+    if(this->taskQueue.size() < (size_t)maxrequest)
+    {
+        this->taskQueue.push(reqstruct);
+        sem_post(&this->sem);
+        return true;
+    }
+    return false;
+}
+template<typename T>
 void ThreadPool<T>::work()
 {
     while(!isClose)
@@ -66,9 +78,10 @@ void ThreadPool<T>::work()
         T* task=this->taskQueue.pop();
         if(task!=nullptr)
         {
-            auto &f=funbox.at(task->state);
-            f(task);
+            // auto &f=funbox.at(task->state);
+            // f(task);
             //task->process();
+            funbox.at(task->state)(task);
         }
         else{
             sleep(1);
@@ -105,8 +118,9 @@ void ThreadPool<T>::close()
     }
 }
 template <typename T>
-inline int ThreadPool<T>::addFunction(std::function<int(T *)>)
+inline int ThreadPool<T>::addFunction(std::function<int(T *)>fun)
 {
+    funbox.push_back(fun);
     return 0;
 }
 template <typename T>
