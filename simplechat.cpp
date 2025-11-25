@@ -67,6 +67,12 @@ void SimpleChat::thread_pool() {
     }
     if (m_pool == nullptr) {
         m_pool = new ThreadPool<tcp_conn>(m_thread_count);
+        m_poll->addFunction([](tcp_conn* conn) {
+            return conn->recvData(conn);
+        });
+        m_pool->addFunction([](tcp_conn* conn) {
+            return conn->sendData(conn);
+        });
         m_pool->start();
     }
 }
@@ -121,7 +127,7 @@ void SimpleChat::eventListen()
     epoll_fd = epfd;
     ep_size = sizeof(events) / sizeof(struct epoll_event);
     if (users == nullptr) {
-        users = new tcp_conn[ep_size];
+        users = new tcp_conn[MAX_FD];
     }
 }
 
@@ -153,6 +159,11 @@ void SimpleChat::eventLoop()
                     continue;
                 }
                 setNonBlock(userfd);
+                if (userfd >= MAX_FD) {
+                    close(userfd);
+                    continue;
+                }
+                users[userfd].setFd(userfd);  // 初始化连接对象
                 struct epoll_event ev;
                 memset(&ev, 0, sizeof(ev));
                 ev.events = EPOLLIN | EPOLLRDHUP;
@@ -181,33 +192,15 @@ void SimpleChat::eventLoop()
 }
 
 void SimpleChat::handleRead(int sockfd) {
-    // char buf[1024];
-    // memset(buf, 0, sizeof(buf));
-    // int len = recv(sockfd, buf, sizeof(buf), 0);
-    // if (len == 0) {
-    //     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, sockfd, NULL);
-    //     close(sockfd);
-    // } else if (len > 0) {
-    //     send(sockfd, buf, len, 0);
-    // } else {
-    //     if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
-    //         perror("recv");
-    //         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, sockfd, NULL);
-    //         close(sockfd);
-    //     }
-    // }
-    m_pool->append(users+sockfd,0);
+    if (sockfd >= MAX_FD || m_pool == nullptr) {
+        return;
+    }
+    m_pool->append(&users[sockfd], 0);  // 0 表示读操作
 }
 
 void SimpleChat::handleWrite(int sockfd) {
-    // struct epoll_event ev;
-    // memset(&ev, 0, sizeof(ev));
-    // ev.events = EPOLLIN | EPOLLRDHUP;
-    // ev.data.fd = sockfd;
-    // if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, sockfd, &ev) == -1) {
-    //     perror("epoll_ctl-mod");
-    //     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, sockfd, NULL);
-    //     close(sockfd);
-    // }
-    m_pool->append(users+sockfd,1);
+    if (sockfd >= MAX_FD || m_pool == nullptr) {
+        return;
+    }
+    m_pool->append(&users[sockfd], 1);  // 1 表示写操作
 }

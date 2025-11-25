@@ -6,14 +6,12 @@
 #include<vector>
 #include<semaphore.h>
 #include<unistd.h>
-#include<functional>
-#include<vector>
+#include<utility>  // for std::pair
 template<typename T>
 class ThreadPool
 {
 public:
     ThreadPool(int threadCount=8,int maxrequest=10000);
-    bool append(T* reqstruct);
     bool append(T* reqstruct,int state);
     bool isClosePool();
     void work();
@@ -23,7 +21,7 @@ public:
     ~ThreadPool();
 private:
     //线程安全的任务队列
-    SafeQueue<T*> taskQueue;
+    SafeQueue<std::pair<int,T*>> taskQueue;
     int threadCount;//当前线程数量
     int maxrequest;//线程池允许的最大线程数量
     bool isClose;//线程池是否关闭
@@ -48,22 +46,12 @@ ThreadPool<T>::ThreadPool(int threadCount, int maxrequest)
     
 }
 template<typename T>
-bool ThreadPool<T>::append(T* reqstruct)
-{
-    if(this->taskQueue.size() < (size_t)maxrequest)
-    {
-        this->taskQueue.push(reqstruct);
-        sem_post(&this->sem);
-        return true;
-    }
-    return false;
-}
-template<typename T>
 bool ThreadPool<T>::append(T* reqstruct,int state)
 {
     if(this->taskQueue.size() < (size_t)maxrequest)
     {
-        this->taskQueue.push(reqstruct);
+        reqstruct->state = state;  // 设置任务状态
+        this->taskQueue.push(std::make_pair(state,reqstruct)); 
         sem_post(&this->sem);
         return true;
     }
@@ -75,13 +63,23 @@ void ThreadPool<T>::work()
     while(!isClose)
     {
         sem_wait(&this->sem);
-        T* task=this->taskQueue.pop();
-        if(task!=nullptr)
+        if(this->taskQueue.empty())
         {
-            // auto &f=funbox.at(task->state);
-            // f(task);
-            //task->process();
-            funbox.at(task->state)(task);
+            sleep(1);
+            continue;
+        }
+        std::pair<int, T*> task = this->taskQueue.pop();
+        if(task.second != nullptr)
+        {
+            if(task.first >= 0 && (size_t)task.first < funbox.size())
+            {
+                funbox.at(task.first)(task.second);
+            }
+            else
+            {
+                std::cout<<"没有注册对应的处理函数"<<std::endl;
+                delete task.second;
+            }
         }
         else{
             sleep(1);
@@ -121,7 +119,7 @@ template <typename T>
 inline int ThreadPool<T>::addFunction(std::function<int(T *)>fun)
 {
     funbox.push_back(fun);
-    return 0;
+    return funbox.size() - 1;  // 返回函数在funbox中的索引
 }
 template <typename T>
 ThreadPool<T>::~ThreadPool()

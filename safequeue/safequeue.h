@@ -74,7 +74,7 @@ T SafeQueue<T>::pop()
     if(list.empty())
     {
         pthread_mutex_unlock(&mutex);
-        return nullptr;
+        return T{};  // 返回默认构造的值，对于指针类型是nullptr，对于pair等类型是默认构造
     }
     T value = list.front();
     list.pop_front();

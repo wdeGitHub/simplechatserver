@@ -1,3 +1,5 @@
+#include <netinet/in.h>
+#include <iostream>
 #include <stdio.h>
 #include <ctype.h>
 #include <unistd.h>
@@ -8,119 +10,125 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
-
+#include<exception>
+using namespace std;
 // server
+enum{
+    ET,
+    LT
+};
+static const int lstate=ET;
+static const int cstate=ET;
+
+void dealread(int fd);
+void dealwrite(int fd);
 int main(int argc, const char* argv[])
 {
-    // 创建监听的套接字
-    int lfd = socket(AF_INET, SOCK_STREAM, 0);
-    if(lfd == -1)
+    int lfd=socket(AF_INET,SOCK_STREAM,0);
+    if(lfd<0)
     {
-        perror("socket error");
-        exit(1);
+        throw exception();
     }
-
-    // 绑定
-    struct sockaddr_in serv_addr;
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(9999);
-    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);  // 本地多有的ＩＰ
-    
-    // 设置端口复用
-    int opt = 1;
-    setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-    // 绑定端口
-    int ret = bind(lfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
-    if(ret == -1)
+    //绑定端口
+    struct sockaddr_in addr;
+    addr.sin_addr.s_addr=INADDR_ANY;
+    addr.sin_port=htons(9990);
+    addr.sin_family=AF_INET;
+    int tmp=bind(lfd,(sockaddr*)&addr,sizeof(addr));
+    if(tmp<0)
     {
-        perror("bind error");
-        exit(1);
+        std::cout<<"bind error";
     }
-
-    // 监听
-    ret = listen(lfd, 64);
-    if(ret == -1)
-    {
-        perror("listen error");
-        exit(1);
-    }
-
-    // 现在只有监听的文件描述符
-    // 所有的文件描述符对应读写缓冲区状态都是委托内核进行检测的epoll
-    // 创建一个epoll模型
-    int epfd = epoll_create(100);
-    if(epfd == -1)
-    {
-        perror("epoll_create");
-        exit(0);
-    }
-
-    // 往epoll实例中添加需要检测的节点, 现在只有监听的文件描述符
-    struct epoll_event ev;
-    ev.events = EPOLLIN;    // 检测lfd读读缓冲区是否有数据
-    ev.data.fd = lfd;
-    ret = epoll_ctl(epfd, EPOLL_CTL_ADD, lfd, &ev);
-    if(ret == -1)
-    {
-        perror("epoll_ctl");
-        exit(0);
-    }
-
-    struct epoll_event evs[1024];
-    int size = sizeof(evs) / sizeof(struct epoll_event);
-    // 持续检测
+    int epfd=epoll_create(100);
+    struct sockaddr caddr;
+    socklen_t size;
+    int cfd=accept(lfd,&caddr,&size);
+    struct epoll_event epev;
+    epev.events=EPOLLIN;
+    epev.data.fd=cfd;
+    epoll_ctl(epfd, EPOLL_CTL_ADD,cfd,&epev );
+    struct epoll_event evns[1024];
+    int maxevns=sizeof(evns)/sizeof(evns[0]);
     while(1)
     {
-        // 调用一次, 检测一次
-        int num = epoll_wait(epfd, evs, size, -1);
-        for(int i=0; i<num; ++i)
+        int num=epoll_wait(epfd, evns, maxevns, 0);
+        for(int i=0;i<num;i++)
         {
-            // 取出当前的文件描述符
-            int curfd = evs[i].data.fd;
-            // 判断这个文件描述符是不是用于监听的
-            if(curfd == lfd)
+            int fd=evns[i].data.fd;
+            if(fd==cfd)
             {
-                // 建立新的连接
-                int cfd = accept(curfd, NULL, NULL);
-                // 新得到的文件描述符添加到epoll模型中, 下一轮循环的时候就可以被检测了
-                ev.events = EPOLLIN;    // 读缓冲区是否有数据
-                ev.data.fd = cfd;
-                ret = epoll_ctl(epfd, EPOLL_CTL_ADD, cfd, &ev);
-                if(ret == -1)
+                int cfd=accept(lfd,&caddr,&size);
+                struct epoll_event epev;
+                if(lstate==ET)
                 {
-                    perror("epoll_ctl-accept");
-                    exit(0);
+                    epev.events=EPOLLIN|EPOLLET;
                 }
+                else {
+                    epev.events=EPOLLIN;
+                }
+                epev.data.fd=cfd;
+                epoll_ctl(epfd, EPOLL_CTL_ADD,cfd,&epev );
             }
-            else
-            {
-                // 处理通信的文件描述符
-                // 接收数据
-                char buf[1024];
-                memset(buf, 0, sizeof(buf));
-                int len = recv(curfd, buf, sizeof(buf), 0);
-                if(len == 0)
+            else {
+                if(evns[i].events&EPOLLIN)
                 {
-                    printf("客户端已经断开了连接\n");
-                    // 将这个文件描述符从epoll模型中删除
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, curfd, NULL);
-                    close(curfd);
+                    dealread(fd);
                 }
-                else if(len > 0)
+                else if(evns[i].events&EPOLLOUT)
                 {
-                    printf("客户端say: %s\n", buf);
-                    send(curfd, buf, len, 0);
+                    dealwrite(fd);
                 }
-                else
+                else if(evns[i].events&EPOLLERR)
                 {
-                    perror("recv");
-                    exit(0);
-                } 
+                    cout<<"error";
+                }
             }
         }
-    }
 
-    return 0;
+    }
+}
+void dealread(int fd)
+{
+    if(cstate==ET)
+    {
+        char buf[1024];
+        memset(buf, 0, sizeof(buf));
+        int alllen=0;
+        while(1)
+        {
+            char subuf[100];
+            memset(subuf,0,sizeof(subuf));
+            int len=read(fd, subuf, sizeof(buf)); 
+            if(len==0)
+            {
+                break;
+            }
+            alllen+=len;
+            strcpy(buf+alllen, subuf);
+        }
+    }
+    else if(cstate==LT)
+    {
+        char buf[100];
+        memset(buf, 0, sizeof(buf));
+        int len=read(fd, buf, sizeof(buf));
+        if(len>0)
+        {
+
+        }
+        else if(len<0)
+        {
+
+        }
+        else 
+        {
+
+        }
+    }
+    
+
+}
+void dealwrite()
+{
+
 }
