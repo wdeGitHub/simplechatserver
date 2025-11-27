@@ -1,4 +1,5 @@
 #include"sqlconnectionpool.h"
+#include <stdexcept>
 
 SqlConnectionPool *SqlConnectionPool::getInstance()
 {
@@ -14,12 +15,13 @@ void SqlConnectionPool::init(std::string ip, std::string user, std::string passw
         MYSQL *mysql=mysql_init(NULL);//会分配内存
         if(mysql==nullptr)
         {
-            int ret=mysql_errno(mysql);
-            return ;
+            throw std::runtime_error("mysql_init failed");
         }
-        //mysql_real_connect(mysql, "localhost", "root", "@Yd66666", "SCSdata", Port, NULL, 0);
         mysql = mysql_real_connect(mysql, ip.c_str(), user.c_str(), passwd.c_str(), db.c_str(), Port, NULL, 0);
-        //
+        if(mysql == nullptr)
+        {
+            throw std::runtime_error("mysql_real_connect failed");
+        }
         mysql_set_character_set(mysql, "utf8");
         conlist.push_b(mysql);
     }

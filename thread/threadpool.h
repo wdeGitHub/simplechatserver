@@ -50,7 +50,6 @@ bool ThreadPool<T>::append(T* reqstruct,int state)
 {
     if(this->taskQueue.size() < (size_t)maxrequest)
     {
-        reqstruct->state = state;  // 设置任务状态
         this->taskQueue.push(std::make_pair(state,reqstruct)); 
         sem_post(&this->sem);
         return true;
