@@ -66,29 +66,21 @@ string func3()
 
 int main()
 {
-    string recvBuf = func1();
-    // 数据的反序列化   json字符串 =》反序列化 数据对象（看作容器，方便访问）
-    json jsbuf = json::parse(recvBuf);
-    cout<<jsbuf["msg_type"]<<endl;
-    cout<<jsbuf["from"]<<endl;
-    cout<<jsbuf["to"]<<endl;
-    cout<<jsbuf["msg"]<<endl;
-
-    // cout<<jsbuf["id"]<<endl;
-    // auto arr = jsbuf["id"];
-    // cout<<arr[2]<<endl;
-
-    // auto msgjs = jsbuf["msg"];
-    // cout<<msgjs["zhang san"]<<endl;
-    // cout<<msgjs["liu shuo"]<<endl;
-
-    // vector<int> vec = jsbuf["list"]; // js对象里面的数组类型，直接放入vector容器当中
-    // for (int &v : vec)
-    // {
-    //     cout << v << " ";
-    // }
-    // cout << endl;
-
+    // string recvBuf = func2();
+    // // 数据的反序列化   json字符串 =》反序列化 数据对象（看作容器，方便访问）
+    // json jsbuf = json::parse(recvBuf);
+    // cout<<jsbuf["msg_type"]<<endl;
+    // cout<<jsbuf["from"]<<endl;
+    // cout<<jsbuf["to"]<<endl;
+    // cout<<jsbuf["msg"]<<endl;
+    // cout<<jsbuf.dump()<<endl;
+    std::string raw_json = R"([0,"","","士大夫萨达+asdfsdf\n"])";
+    json data = json::parse(raw_json);    
+    int id = data[0].get<int>();
+    string name = data[1].get<string>();
+    string password = data[2].get<string>();
+    string email = data[3].get<string>();
+    cout << id << " " << name << " " << password << " " << email << endl;
     // map<int, string> mymap = jsbuf["path"];
     // for (auto &p : mymap)
     // {

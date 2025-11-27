@@ -1,4 +1,5 @@
 #include "simplechat.h"
+#include "request/tcp_conn.h"
 #include <cerrno>
 #include <stdexcept>
 
@@ -68,7 +69,9 @@ void SimpleChat::thread_pool() {
 
 void SimpleChat::sql_pool() {
   m_sqlconnpool = SqlConnectionPool::getInstance();
-  m_sqlconnpool->init(m_ip, m_user, m_passwd, m_db, m_port, m_con_num);
+  m_sqlconnpool->init("localhost","root","@Yd66666","SCSdata",0,8);
+  //m_sqlconnpool->init(m_ip, m_user, m_passwd, m_db, m_port, m_con_num);
+  users->initAllResult();
 }
 
 void SimpleChat::eventListen() {
@@ -159,6 +162,7 @@ void SimpleChat::eventLoop() {
           ev.data.fd = userfd;
           if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, userfd, &ev) == -1) {
             perror("epoll_ctl-accept");
+            users[userfd].cleanAllData();
             close(userfd);
           }
         }

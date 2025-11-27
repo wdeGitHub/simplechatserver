@@ -20,4 +20,13 @@ private:
     MYSQL* m_mysql;
     SafeQueue<MYSQL*>conlist;
 };
+class sqlRAII
+{
+public:
+    sqlRAII(MYSQL **sql);
+    ~sqlRAII();
+private:
+    SqlConnectionPool*m_pool;
+    MYSQL *m_sql;
+};
 #endif

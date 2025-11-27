@@ -1,2 +1,2 @@
 test_json: test_json.cpp 
-	g++ -o test_json test_json.cpp -std=c++11
+	g++ -o test_json test_json.cpp -std=c++17

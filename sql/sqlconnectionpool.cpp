@@ -54,3 +54,13 @@ SqlConnectionPool::~SqlConnectionPool()
 {
     DestroyPool();
 }
+
+sqlRAII::sqlRAII(MYSQL **sql)
+{
+   this->m_sql=*sql;
+    *sql=SqlConnectionPool::getInstance()->GetConnection();
+}
+sqlRAII::~sqlRAII()
+{
+    SqlConnectionPool::getInstance()->ReleaseConnection(m_sql);
+}
